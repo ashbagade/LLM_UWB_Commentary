@@ -1,0 +1,12 @@
+{
+    "boundary4": 0,
+    "boundary6": 1,
+    "cancelcall": 2,
+    "deadball": 3,
+    "legbye": 4,
+    "noball": 5,
+    "out": 6,
+    "penaltyrun": 7,
+    "shortrun": 8,
+    "wide": 9
+}
