@@ -11,7 +11,6 @@ from typing import List, Dict, Any, Optional
 from src.inference.run_trial_to_events import mat_to_events
 from src.state.cricket_state import MatchState, apply_event_to_state
 from src.commentary.llm_client import LLMClient
-from src.commentary.engine import CommentaryEngine
 from src.events.schema import UmpireEvent
 
 
@@ -29,6 +28,98 @@ def _format_overs(balls_bowled: int) -> str:
     return f"{balls_bowled // 6}.{balls_bowled % 6}"
 
 
+def generate_batch_commentary(
+    llm_client: LLMClient,
+    match_log: List[Dict[str, Any]],
+) -> Dict[int, str]:
+    """
+    Ask Gemini ONCE to generate commentary for all balls.
+
+    match_log entries must contain:
+      - ball_index
+      - event_type
+      - confidence
+      - score_before {runs, wickets, balls_bowled, overs}
+      - score_after  {runs, wickets, balls_bowled, overs}
+
+    Returns:
+      dict mapping ball_index -> commentary string
+    """
+    if not match_log:
+        return {}
+
+    # Build ball-by-ball description to feed the LLM.
+    lines: List[str] = []
+    for rec in match_log:
+        b = rec["ball_index"]
+        ev = rec["event_type"]
+        conf = rec["confidence"]
+        sb = rec["score_before"]
+        sa = rec["score_after"]
+        lines.append(
+            f"Ball {b}:\n"
+            f"- event_type: {ev}\n"
+            f"- confidence: {conf:.2f}\n"
+            f"- score_before: {sb['runs']}/{sb['wickets']} "
+            f"after {sb['balls_bowled']} balls ({sb['overs']} overs)\n"
+            f"- score_after:  {sa['runs']}/{sa['wickets']} "
+            f"after {sa['balls_bowled']} balls ({sa['overs']} overs)\n"
+        )
+
+    # More lively, broadcast-style instructions with an example.
+    instructions = (
+        "You are a lively TV cricket commentator calling a T20 innings. "
+        "You love using vivid language, talking about momentum, pressure, and how the innings is unfolding. "
+        "You must stay consistent with the ball-by-ball data: do NOT invent impossible details like player names, "
+        "venue names, or scores that do not match the numbers given.\n\n"
+        "For each ball, write 1–3 sentences of broadcast-style commentary as if you are speaking live on air. "
+        "Commentary for ball i should take into account only balls 1..i (earlier context is fine, but never future balls).\n\n"
+        "Return your answer as a strict JSON array with this structure:\n"
+        "[\n"
+        '  {"ball_index": 1, "commentary": "SIX! Rohit launches the very first ball into the stands, '
+        'sending a clear message that the bowlers will be under pressure from the start."},\n'
+        '  {"ball_index": 2, "commentary": "Much tighter from the bowler this time, just a nudged single '
+        'into the leg side as the batsmen rotate the strike and settle in."}\n'
+        "]\n"
+        "Do not include any text before or after the JSON.\n"
+    )
+
+    content = instructions + "\nBall-by-ball data:\n\n" + "\n".join(lines)
+    messages = [{"role": "user", "content": content}]
+
+    # Rough upper bound: ~120 tokens per ball, capped at 2048.
+    max_tokens = min(2048, 120 * len(match_log))
+
+    raw = llm_client.generate(messages, max_tokens=max_tokens, temperature=0.9)
+    raw = raw.strip()
+
+    # Strip to the JSON array if there is extra text (defensive).
+    start = raw.find("[")
+    end = raw.rfind("]")
+    if start != -1 and end != -1 and end > start:
+        json_str = raw[start : end + 1]
+    else:
+        json_str = raw
+
+    try:
+        data = json.loads(json_str)
+    except Exception as e:
+        print(f"[WARN] Failed to parse JSON from LLM output: {e}")
+        return {}
+
+    commentary_map: Dict[int, str] = {}
+    if isinstance(data, list):
+        for item in data:
+            try:
+                idx = int(item.get("ball_index"))
+                cmt = str(item.get("commentary", "")).strip()
+                if cmt:
+                    commentary_map[idx] = cmt
+            except Exception:
+                continue
+
+    return commentary_map
+
 def simulate_match_from_folder(
     data_root: str,
     checkpoint: str,
@@ -41,22 +132,13 @@ def simulate_match_from_folder(
     merge_gap_sec: float = 0.5,
     time_step_sec: float = 30.0,
     model_name: str = "gemini-2.0-flash",
-    history_limit: int = 30,
+    history_limit: int = 30,  # unused in batch mode, kept for CLI compatibility
     seed: Optional[int] = None,
     log_json: Optional[str] = None,
 ) -> None:
     """
-    Build a pseudo-match by sampling .mat files from data_root and generating
-    commentary for each detected event.
-
-    Each .mat file is treated as one ball worth of sensor data. We:
-      - detect the best umpire event from that trial,
-      - map it onto a synthetic match timeline,
-      - update MatchState,
-      - and generate LLM commentary.
-
-    This is purely for offline demonstration, since the dataset is not a
-    continuous match stream.
+    Build a pseudo-match by sampling .mat files and then calling Gemini ONCE
+    to get commentary for all balls.
     """
     data_dir = Path(data_root)
     if not data_dir.exists():
@@ -74,24 +156,17 @@ def simulate_match_from_folder(
 
     selected_paths = random.sample(mat_paths, num_trials)
 
-    # Initialize commentary engine and match state
-    llm_client = LLMClient(system_prompt=DEFAULT_SYSTEM_PROMPT, model_name=model_name)
-    engine = CommentaryEngine(
-        llm_client=llm_client,
-        system_prompt=DEFAULT_SYSTEM_PROMPT,
-        history_limit=history_limit,
-    )
     state = MatchState()
-
     match_log: List[Dict[str, Any]] = []
     current_time = 0.0
     ball_index = 0
 
-    print(f"Simulating pseudo-match with {len(selected_paths)} balls...\n")
+    print(f"Building pseudo-match with {len(selected_paths)} balls (batch LLM)...\n")
 
+    # 1) Detection + state update for all balls (no LLM yet)
     for mat_path in selected_paths:
         ball_index += 1
-        # 1) Detect events for this trial
+
         events = mat_to_events(
             mat_path=str(mat_path),
             checkpoint_path=checkpoint,
@@ -106,13 +181,16 @@ def simulate_match_from_folder(
         )
 
         if not events:
-            print(f"[Ball {ball_index}] {mat_path.name}: no confident events detected, skipping.")
+            print(
+                f"[Ball {ball_index}] {mat_path.name}: "
+                "no confident events detected, skipping."
+            )
             continue
 
-        # 2) Pick the "best" event from this trial (highest confidence, earliest time)
+        # Pick the best event from this trial
         best = max(events, key=lambda e: (e.confidence, -e.timestamp))
 
-        # Map onto synthetic global match time
+        # Synthetic global match time
         current_time += time_step_sec
         event_for_match = UmpireEvent(
             timestamp=current_time,
@@ -120,34 +198,25 @@ def simulate_match_from_folder(
             confidence=best.confidence,
         )
 
-        # Snapshot score before the ball
-        prev_runs = state.total_runs
-        prev_wkts = state.wickets
-        prev_balls = state.balls_bowled
+        # Snapshot score BEFORE applying this ball
+        score_before = {
+            "runs": state.total_runs,
+            "wickets": state.wickets,
+            "balls_bowled": state.balls_bowled,
+            "overs": _format_overs(state.balls_bowled),
+        }
 
-        # 3) Update match state
+        # Update state
         apply_event_to_state(state, event_for_match)
 
-        # 4) Generate commentary
-        commentary = engine.generate_for_event(state, event_for_match)
+        # Snapshot score AFTER this ball
+        score_after = {
+            "runs": state.total_runs,
+            "wickets": state.wickets,
+            "balls_bowled": state.balls_bowled,
+            "overs": _format_overs(state.balls_bowled),
+        }
 
-        # 5) Print a "broadcast" style update
-        print(f"Ball {ball_index}: file={mat_path.name}")
-        print(f"  Detected event: {event_for_match.event_type.value} (conf={event_for_match.confidence:.2f})")
-        print(
-            f"  Score before ball: {prev_runs}/{prev_wkts} "
-            f"after {prev_balls} balls ({_format_overs(prev_balls)} overs)"
-        )
-        print(
-            f"  Score after ball:  {state.total_runs}/{state.wickets} "
-            f"after {state.balls_bowled} balls ({_format_overs(state.balls_bowled)} overs)"
-        )
-        print("  Commentary:")
-        for line in commentary.splitlines():
-            print(f"    {line}")
-        print("-" * 70)
-
-        # 6) Append to log
         match_log.append(
             {
                 "ball_index": ball_index,
@@ -155,23 +224,53 @@ def simulate_match_from_folder(
                 "event_type": event_for_match.event_type.value,
                 "confidence": event_for_match.confidence,
                 "match_time": event_for_match.timestamp,
-                "score_after": {
-                    "runs": state.total_runs,
-                    "wickets": state.wickets,
-                    "balls_bowled": state.balls_bowled,
-                },
-                "commentary": commentary,
+                "score_before": score_before,
+                "score_after": score_after,
             }
         )
 
-    print("\nFinal match state:")
+    print("\nFinal match state after detection (before commentary):")
     print(
         f"  Score: {state.total_runs}/{state.wickets} "
         f"after {state.balls_bowled} balls ({_format_overs(state.balls_bowled)} overs)"
     )
     print(f"  Fours: {state.fours}, Sixes: {state.sixes}")
 
-    # Optionally save log to JSON
+    if not match_log:
+        print("\nNo balls with detected events; nothing to send to LLM.")
+        return
+
+    # 2) Single batched Gemini call for all commentary
+    llm_client = LLMClient(system_prompt=DEFAULT_SYSTEM_PROMPT, model_name=model_name)
+    commentary_map = generate_batch_commentary(llm_client, match_log)
+
+    print("\n=== Ball-by-ball commentary ===\n")
+    for rec in match_log:
+        b = rec["ball_index"]
+        ev = rec["event_type"]
+        cmt = commentary_map.get(b, "(no commentary)")
+        sb = rec["score_before"]
+        sa = rec["score_after"]
+
+        print(f"Ball {b}: file={rec['file']}")
+        print(f"  Detected event: {ev} (conf={rec['confidence']:.2f})")
+        print(
+            f"  Score before ball: {sb['runs']}/{sb['wickets']} "
+            f"after {sb['balls_bowled']} balls ({sb['overs']} overs)"
+        )
+        print(
+            f"  Score after ball:  {sa['runs']}/{sa['wickets']} "
+            f"after {sa['balls_bowled']} balls ({sa['overs']} overs)"
+        )
+        print("  Commentary:")
+        for line in cmt.splitlines():
+            print(f"    {line}")
+        print("-" * 70)
+
+        # Attach commentary back into log
+        rec["commentary"] = cmt
+
+    # 3) Optional JSON log
     if log_json is not None:
         log_path = Path(log_json)
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -184,7 +283,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Simulate a pseudo cricket match by sampling .mat files from a folder, "
-            "detecting umpire events, updating match state, and generating LLM commentary."
+            "detecting umpire events, updating match state, and generating LLM commentary "
+            "in a single batched Gemini call."
         )
     )
     parser.add_argument(
@@ -257,7 +357,7 @@ def main() -> None:
         "--history-limit",
         type=int,
         default=30,
-        help="Max number of messages to keep in commentary history (including system).",
+        help="(Unused in batch mode; kept for compatibility).",
     )
     parser.add_argument(
         "--seed",
