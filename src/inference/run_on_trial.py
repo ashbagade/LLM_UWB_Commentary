@@ -67,7 +67,6 @@ def make_windows(
         if start >= T:
             break
 
-        # Slice window; pad if needed
         win = seq[start:end]
         if win.shape[0] < window_size:
             pad_len = window_size - win.shape[0]
@@ -76,7 +75,6 @@ def make_windows(
 
         windows.append(win)
 
-        # Representative time = mean of timestamps in [start:end]
         if timestamps is not None:
             slice_ts = timestamps[start:min(end, T)]
             if slice_ts.size == 0:
@@ -84,13 +82,12 @@ def make_windows(
             else:
                 t_rep = float(slice_ts.mean())
         else:
-            # Fallback to synthetic "time index"
             t_rep = float(start + min(window_size, T - start) / 2.0)
 
         window_times.append(t_rep)
         start += stride
 
-    windows_arr = np.stack(windows, axis=0)  # (N, window_size, F)
+    windows_arr = np.stack(windows, axis=0)
     return windows_arr, window_times
 
 
@@ -132,13 +129,10 @@ def load_label_mapping(label_map_path: Optional[str]) -> Optional[Dict[int, str]
 
     idx_to_label: Dict[int, str] = {}
 
-    # Detect format
     if all(isinstance(v, int) for v in obj.values()):
-        # label_to_idx: invert
         for label, idx in obj.items():
             idx_to_label[int(idx)] = label
     else:
-        # idx_to_label: keys are indices as strings
         for k, v in obj.items():
             idx_to_label[int(k)] = str(v)
 
@@ -166,17 +160,13 @@ def run_inference_on_mat(
             "prob": float
         }
     """
-    # 1) Load sample using existing ViSig loader
     sample = load_visig_mat(mat_path)
 
-    # 2) Convert to flat (T, F) sequence (same as training)
-    seq = to_flat_sequence(sample, use_upper_tri_dist=True)  # (T, F)
+    seq = to_flat_sequence(sample, use_upper_tri_dist=True)
     T, Fdim = seq.shape
 
-    # 3) Get timestamps if available on the sample
     timestamps = getattr(sample, "t", None)
 
-    # 4) Make windows
     windows_np, window_times = make_windows(
         seq=seq,
         timestamps=timestamps,
@@ -185,23 +175,20 @@ def run_inference_on_mat(
         pad_value=pad_value,
     )
 
-    # 5) Build and load the model (metadata comes from checkpoint)
     device = get_device(device_str)
     model = load_model_from_checkpoint(
         checkpoint_path=checkpoint_path,
         device=device,
     )
 
-    # 6) Run inference
-    windows_tensor = torch.from_numpy(windows_np).float().to(device)  # (N, L, F)
+    windows_tensor = torch.from_numpy(windows_np).float().to(device)
     with torch.no_grad():
-        logits = model(windows_tensor)  # (N, num_classes)
-        probs = F.softmax(logits, dim=1)  # (N, num_classes)
-        pred_probs, pred_indices = probs.max(dim=1)  # (N,), (N,)
+        logits = model(windows_tensor)
+        probs = F.softmax(logits, dim=1)
+        pred_probs, pred_indices = probs.max(dim=1)
 
     idx_to_label = load_label_mapping(label_map_path)
 
-    # 7) Build result objects
     results: List[Dict[str, Any]] = []
     for i in range(windows_np.shape[0]):
         idx = int(pred_indices[i].item())

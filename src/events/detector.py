@@ -6,7 +6,6 @@ from src.events.schema import EventType, UmpireEvent
 
 
 WindowPred = Tuple[float, str, float]
-# (timestamp, label, prob)
 
 
 def _normalize_window_preds(window_preds: Iterable[WindowPred]) -> List[WindowPred]:
@@ -14,7 +13,7 @@ def _normalize_window_preds(window_preds: Iterable[WindowPred]) -> List[WindowPr
     Ensure window_preds is a clean list[(time, label, prob)] sorted by time.
     """
     preds = list(window_preds)
-    preds.sort(key=lambda x: x[0])  # sort by time
+    preds.sort(key=lambda x: x[0])
     return preds
 
 
@@ -50,7 +49,6 @@ def detect_events(
     """
     preds = _normalize_window_preds(window_preds)
 
-    # 1) Filter windows by confidence and label
     filtered: List[WindowPred] = []
     for t, label, prob in preds:
         if label is None:
@@ -64,7 +62,6 @@ def detect_events(
     if not filtered:
         return []
 
-    # 2) Group consecutive windows with the same label into runs
     runs: List[List[WindowPred]] = []
     current_run: List[WindowPred] = []
     current_label: str | None = None
@@ -76,41 +73,35 @@ def detect_events(
         elif label == current_label:
             current_run.append((t, label, prob))
         else:
-            # Finish previous run
             runs.append(current_run)
-            # Start new run
             current_label = label
             current_run = [(t, label, prob)]
 
     if current_run:
         runs.append(current_run)
 
-    # 3) Convert runs to events (apply min_run_length)
     events: List[UmpireEvent] = []
     for run in runs:
         if len(run) < min_run_length:
-            continue  # discard short runs
+            continue
 
         times = [t for t, _, _ in run]
         probs = [p for _, _, p in run]
-        label = run[0][1]  # all labels in run are the same
+        label = run[0][1]
 
-        # Map label string to EventType; skip unknown labels gracefully
         try:
             event_type = EventType(label)
         except ValueError:
-            # Label not in EventType enum; skip
             continue
 
-        timestamp = float(sum(times) / len(times))  # mean time
-        confidence = float(sum(probs) / len(probs))  # mean prob
+        timestamp = float(sum(times) / len(times))
+        confidence = float(sum(probs) / len(probs))
 
         events.append(UmpireEvent(timestamp=timestamp, event_type=event_type, confidence=confidence))
 
     if not events:
         return []
 
-    # 4) Optionally merge nearby events of the same type
     events.sort(key=lambda e: e.timestamp)
     merged: List[UmpireEvent] = []
     for ev in events:
@@ -120,7 +111,6 @@ def detect_events(
 
         last = merged[-1]
         if ev.event_type == last.event_type and (ev.timestamp - last.timestamp) <= merge_gap_sec:
-            # Merge: new timestamp = average, confidence = max
             new_t = (last.timestamp + ev.timestamp) / 2.0
             new_conf = max(last.confidence, ev.confidence)
             merged[-1] = UmpireEvent(timestamp=new_t, event_type=last.event_type, confidence=new_conf)

@@ -25,7 +25,6 @@ def mat_to_events(
     """
     Convenience wrapper: run model on .mat and detect discrete events.
     """
-    # 1) Run window-level inference (reusing Milestone 0 code)
     window_preds = run_inference_on_mat(
         mat_path=mat_path,
         checkpoint_path=checkpoint_path,
@@ -36,15 +35,13 @@ def mat_to_events(
         pad_value=pad_value,
     )
 
-    # 2) Convert window_preds dicts → (time, label, prob) tuples
     tuples = []
     for row in window_preds:
         t = float(row["time"])
-        label = row["pred_label"]  # may be None; detector handles this
+        label = row["pred_label"]
         prob = float(row["prob"])
         tuples.append((t, label, prob))
 
-    # 3) Detect events
     events = detect_events(
         window_preds=tuples,
         min_conf=min_conf,

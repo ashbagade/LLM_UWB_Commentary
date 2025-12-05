@@ -54,8 +54,6 @@ class UmpireEvent:
         Convert to a JSON-serializable dict with your preferred field names.
         """
         d = asdict(self)
-        # Serialize Enum as its value (e.g. "boundary6")
         d["event_type"] = self.event_type.value
-        # Rename timestamp key to a shorter "t" if you like
         d["t"] = d.pop("timestamp")
         return d

@@ -84,7 +84,6 @@ def load_model_from_checkpoint(
 
     state_dict: Dict[str, torch.Tensor]
 
-    # Preferred: format saved by train_seq_classifier.py
     if isinstance(ckpt, dict) and "model_state" in ckpt:
         state_dict = ckpt["model_state"]
         if input_dim is None:
@@ -92,14 +91,13 @@ def load_model_from_checkpoint(
         if num_classes is None:
             num_classes = int(ckpt["num_classes"])
         if model_type is None:
-            model_type = ckpt.get("model_type", "cnn")  # type: ignore[assignment]
+            model_type = ckpt.get("model_type", "cnn")
     else:
-        # Fallbacks: plain state_dict / {state_dict:...} / {model_state_dict:...}
         if not isinstance(ckpt, dict):
             raise ValueError("Unexpected checkpoint format (not a dict).")
 
         if all(isinstance(v, torch.Tensor) for v in ckpt.values()):
-            state_dict = ckpt  # type: ignore[assignment]
+            state_dict = ckpt
         elif "state_dict" in ckpt and isinstance(ckpt["state_dict"], dict):
             state_dict = ckpt["state_dict"]
         elif "model_state_dict" in ckpt and isinstance(ckpt["model_state_dict"], dict):
