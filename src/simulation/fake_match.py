@@ -48,7 +48,6 @@ def generate_batch_commentary(
     if not match_log:
         return {}
 
-    # Build ball-by-ball description to feed the LLM.
     lines: List[str] = []
     for rec in match_log:
         b = rec["ball_index"]
@@ -66,7 +65,6 @@ def generate_batch_commentary(
             f"after {sa['balls_bowled']} balls ({sa['overs']} overs)\n"
         )
 
-    # More lively, broadcast-style instructions with an example.
     instructions = (
         "You are a lively TV cricket commentator calling a T20 innings. "
         "You love using vivid language, talking about momentum, pressure, and how the innings is unfolding. "
@@ -87,13 +85,11 @@ def generate_batch_commentary(
     content = instructions + "\nBall-by-ball data:\n\n" + "\n".join(lines)
     messages = [{"role": "user", "content": content}]
 
-    # Rough upper bound: ~120 tokens per ball, capped at 2048.
     max_tokens = min(2048, 120 * len(match_log))
 
     raw = llm_client.generate(messages, max_tokens=max_tokens, temperature=0.9)
     raw = raw.strip()
 
-    # Strip to the JSON array if there is extra text (defensive).
     start = raw.find("[")
     end = raw.rfind("]")
     if start != -1 and end != -1 and end > start:
@@ -132,7 +128,7 @@ def simulate_match_from_folder(
     merge_gap_sec: float = 0.5,
     time_step_sec: float = 30.0,
     model_name: str = "gemini-2.0-flash",
-    history_limit: int = 30,  # unused in batch mode, kept for CLI compatibility
+    history_limit: int = 30,  
     seed: Optional[int] = None,
     log_json: Optional[str] = None,
 ) -> None:
@@ -163,7 +159,6 @@ def simulate_match_from_folder(
 
     print(f"Building pseudo-match with {len(selected_paths)} balls (batch LLM)...\n")
 
-    # 1) Detection + state update for all balls (no LLM yet)
     for mat_path in selected_paths:
         ball_index += 1
 
@@ -187,10 +182,8 @@ def simulate_match_from_folder(
             )
             continue
 
-        # Pick the best event from this trial
         best = max(events, key=lambda e: (e.confidence, -e.timestamp))
 
-        # Synthetic global match time
         current_time += time_step_sec
         event_for_match = UmpireEvent(
             timestamp=current_time,
@@ -198,7 +191,6 @@ def simulate_match_from_folder(
             confidence=best.confidence,
         )
 
-        # Snapshot score BEFORE applying this ball
         score_before = {
             "runs": state.total_runs,
             "wickets": state.wickets,
@@ -206,10 +198,8 @@ def simulate_match_from_folder(
             "overs": _format_overs(state.balls_bowled),
         }
 
-        # Update state
         apply_event_to_state(state, event_for_match)
 
-        # Snapshot score AFTER this ball
         score_after = {
             "runs": state.total_runs,
             "wickets": state.wickets,
@@ -240,7 +230,6 @@ def simulate_match_from_folder(
         print("\nNo balls with detected events; nothing to send to LLM.")
         return
 
-    # 2) Single batched Gemini call for all commentary
     llm_client = LLMClient(system_prompt=DEFAULT_SYSTEM_PROMPT, model_name=model_name)
     commentary_map = generate_batch_commentary(llm_client, match_log)
 
@@ -267,10 +256,8 @@ def simulate_match_from_folder(
             print(f"    {line}")
         print("-" * 70)
 
-        # Attach commentary back into log
         rec["commentary"] = cmt
 
-    # 3) Optional JSON log
     if log_json is not None:
         log_path = Path(log_json)
         log_path.parent.mkdir(parents=True, exist_ok=True)

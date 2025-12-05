@@ -60,7 +60,6 @@ def train_one_epoch(
         x = x.to(device)
         y = y.to(device)
 
-        # Diagnostics: report mask/length coverage on the first batch each epoch
         if batch_idx == 0:
             with torch.no_grad():
                 valid_mask = (x.abs().sum(dim=2) > 0)
@@ -259,7 +258,7 @@ def train_seq_classifier(
         )
 
     base_ds_candidate = getattr(train_ds, "dataset", None)
-    base_ds: CricketSignalsDataset = base_ds_candidate if isinstance(base_ds_candidate, CricketSignalsDataset) else train_ds  # type: ignore
+    base_ds: CricketSignalsDataset = base_ds_candidate if isinstance(base_ds_candidate, CricketSignalsDataset) else train_ds  
     input_dim = base_ds.feature_dim
     num_classes = base_ds.num_classes
 
@@ -267,7 +266,7 @@ def train_seq_classifier(
     print(f"Dataset sizes -> train: {len(train_ds)}, val: {len(val_ds)}, test: {len(test_ds)}")
 
     if use_windows:
-        base_ds: CricketSignalsDataset = getattr(train_ds, "dataset", None) or train_ds  # type: ignore
+        base_ds: CricketSignalsDataset = getattr(train_ds, "dataset", None) or train_ds  
         label_to_idx = base_ds.label_to_idx
 
         def subset_samples(split):
@@ -369,7 +368,6 @@ def train_seq_classifier(
     else:
         raise ValueError(f"Unknown model_type: {model_type}. Expected one of ['cnn', 'lstm'].")
 
-    # Loss configuration
     loss_type = (loss_type or "ce").lower()
     if loss_type == "ce":
         criterion: nn.Module = nn.CrossEntropyLoss()
@@ -398,7 +396,7 @@ def train_seq_classifier(
     best_val_acc = 0.0
     best_state = None
     epochs_no_improve = 0
-    history = []  # Track training history
+    history = []  
 
     for epoch in range(1, num_epochs + 1):
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)

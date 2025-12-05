@@ -18,7 +18,7 @@ class MatchState:
     innings: int = 1
     total_runs: int = 0
     wickets: int = 0
-    balls_bowled: int = 0  # legal deliveries only (no-balls / wides excluded)
+    balls_bowled: int = 0  
     sixes: int = 0
     fours: int = 0
     events: List[UmpireEvent] = field(default_factory=list)
@@ -40,40 +40,30 @@ class MatchState:
         )
 
 
-# ----------------------------------------------------------------------
-# Approximate scoring logic
-# ----------------------------------------------------------------------
-
-# Approximate run values for each umpire signal.
-# NOTE: This is intentionally simplified and does not attempt to model
-# every nuance of cricket law.
 RUN_VALUES = {
     EventType.BOUNDARY4: 4,
     EventType.BOUNDARY6: 6,
-    EventType.CANCELCALL: 0,   # cancel previous signal; we treat as no-op here
+    EventType.CANCELCALL: 0,   
     EventType.DEADBALL: 0,
-    EventType.LEGBYE: 1,       # in reality can be 1+; we approximate as 1
-    EventType.NOBALL: 1,       # extra run; ball is not counted as legal delivery
+    EventType.LEGBYE: 1,       
+    EventType.NOBALL: 1,       
     EventType.OUT: 0,
-    EventType.PENALTYRUN: 5,   # often 5 penalty runs; approximation
-    EventType.SHORTRUN: 0,     # in reality reduces prior runs; we treat as 0 here
-    EventType.WIDE: 1,         # extra run; ball is not counted as legal delivery
+    EventType.PENALTYRUN: 5,   
+    EventType.SHORTRUN: 0,     
+    EventType.WIDE: 1,         
 }
 
-# Whether an event corresponds to a legal ball that should increment balls_bowled.
-# We consider legal deliveries to be those that count towards the over:
-# boundaries, leg byes, outs, etc.
 LEGAL_DELIVERY = {
     EventType.BOUNDARY4: True,
     EventType.BOUNDARY6: True,
     EventType.CANCELCALL: False,
     EventType.DEADBALL: False,
     EventType.LEGBYE: True,
-    EventType.NOBALL: False,       # no-balls do not count as legal balls
+    EventType.NOBALL: False,       
     EventType.OUT: True,
-    EventType.PENALTYRUN: False,   # penalty runs can be independent of a ball
-    EventType.SHORTRUN: True,      # approximate
-    EventType.WIDE: False,         # wides do not count as legal balls
+    EventType.PENALTYRUN: False,   
+    EventType.SHORTRUN: True,      
+    EventType.WIDE: False,         
 }
 
 
@@ -85,29 +75,22 @@ def apply_event_to_state(state: MatchState, event: UmpireEvent) -> MatchState:
     """
     etype = event.event_type
 
-    # 1) Runs
     runs = RUN_VALUES.get(etype, 0)
     state.total_runs += runs
 
-    # 2) Fours / Sixes
     if etype == EventType.BOUNDARY4:
         state.fours += 1
     elif etype == EventType.BOUNDARY6:
         state.sixes += 1
 
-    # 3) Wickets
     if etype == EventType.OUT:
         state.wickets += 1
 
-    # 4) Balls bowled (legal deliveries only)
     if LEGAL_DELIVERY.get(etype, False):
         state.balls_bowled += 1
 
-    # 5) Record event in history
     state.events.append(event)
 
-    # NOTE: We treat CANCELCALL as a no-op for the scoreboard. In a more
-    # detailed implementation, you might want to "undo" the last event.
     return state
 
 
@@ -124,8 +107,6 @@ def build_state_from_events(events: List[UmpireEvent]) -> MatchState:
 
 if __name__ == "__main__":
     from src.events.schema import EventType, UmpireEvent
-
-    # Scenario: 2 × boundary6 + 1 × out → 12 runs, 1 wicket, 3 balls.
     evs = [
         UmpireEvent(timestamp=0.0, event_type=EventType.BOUNDARY6, confidence=1.0),
         UmpireEvent(timestamp=1.0, event_type=EventType.BOUNDARY6, confidence=0.95),
