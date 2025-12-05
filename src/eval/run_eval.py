@@ -36,10 +36,8 @@ def build_windowed_loaders(
     lowpass_k: int,
     uwb_correct: bool,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, Dict, Optional[StandardizeFeatures]]:
-    # Build label mapping
     label_to_idx = build_label_mapping(train_samples + val_samples + test_samples)
 
-    # Pre-transform
     pre_list = []
     if imu_zero_offset:
         pre_list.append(IMUZeroOffset())
@@ -49,7 +47,6 @@ def build_windowed_loaders(
         pre_list.append(UWBCorrectStaticClamp())
     pre_transform = Compose(pre_list) if pre_list else None
 
-    # Train temp for scaler fit
     w_train_temp = WindowedCricketDataset(
         train_samples, label_to_idx,
         window_size=window_size, stride=stride, pad_value=0.0,
@@ -142,7 +139,6 @@ def run_one_training(
 
     if best_state is not None:
         model.load_state_dict(best_state)
-        # Save checkpoint if requested
         if save_dir is not None:
             save_dir.mkdir(parents=True, exist_ok=True)
             ckpt = {
@@ -157,7 +153,6 @@ def run_one_training(
     else:
         ckpt_path = None
     test_acc = evaluate_accuracy(model, test_loader, device)
-    # also window/trial-level
     label_names = {i: n for i, n in enumerate(test_loader.dataset.label_to_idx.keys())}
     wt = evaluate_window_and_trial_level(model, test_loader, device, label_names=label_names, use_trial_level=True)
     out = {
@@ -205,7 +200,6 @@ def main():
             lowpass_k=args.lowpass_k,
             uwb_correct=args.uwb_correct,
         )
-        # Save scaler if used
         if std_tfm is not None:
             (run_subdir).mkdir(parents=True, exist_ok=True)
             std_path = run_subdir / "scaler_windowed.pt"
@@ -222,7 +216,6 @@ def main():
         folds = make_lopo_splits(args.data_root)
         fold_results: List[Dict] = []
         for train_s_all, test_s, pid in folds:
-            # split off a small validation set from train_s_all (stratified)
             tr_s, va_s, _ = stratified_trial_split(train_s_all, train_ratio=0.85, val_ratio=0.15, seed=pid)
             fold_dir = out_dir / f"lopo_pid_{pid}"
             train_loader, val_loader, test_loader, meta, std_tfm = build_windowed_loaders(
@@ -235,7 +228,6 @@ def main():
                 lowpass_k=args.lowpass_k,
                 uwb_correct=args.uwb_correct,
             )
-            # Save scaler if used
             if std_tfm is not None:
                 fold_dir.mkdir(parents=True, exist_ok=True)
                 std_path = fold_dir / "scaler_windowed.pt"
@@ -250,7 +242,6 @@ def main():
             fold_results.append(res)
             print(f"PID {pid} -> {res}")
 
-        # aggregate
         def agg(key: str):
             vals = [r[key] for r in fold_results if key in r]
             return float(np.mean(vals)), float(np.std(vals))

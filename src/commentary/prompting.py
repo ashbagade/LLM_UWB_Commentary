@@ -25,7 +25,6 @@ def build_commentary_prompt(state: MatchState, event: UmpireEvent) -> List[Dict[
         A list of chat-style messages (usually just one user message) to be
         appended after the system message and prior assistant messages.
     """
-    # Score summary
     overs_float = state.overs_as_float()
     score_line = (
         f"Innings: {state.innings}, Score: {state.total_runs}/{state.wickets} "
@@ -33,9 +32,8 @@ def build_commentary_prompt(state: MatchState, event: UmpireEvent) -> List[Dict[
         f"4s: {state.fours}, 6s: {state.sixes}."
     )
 
-    # Recent history: use prior events, excluding the current one
     prior_events = [e for e in state.events if e.timestamp < event.timestamp]
-    recent_events = prior_events[-5:]  # last 5 events for context
+    recent_events = prior_events[-5:]
 
     if recent_events:
         history_lines = "\n".join(
@@ -44,10 +42,8 @@ def build_commentary_prompt(state: MatchState, event: UmpireEvent) -> List[Dict[
     else:
         history_lines = "(no prior events)"
 
-    # New event description
     new_event_desc = _format_event_brief(event)
 
-    # High-level user instruction
     instructions = (
         "You are a lively cricket commentator calling a live match. "
         "Given the current score, recent events, and the NEW umpire signal, "

@@ -295,14 +295,14 @@ def to_flat_sequence(
     """
     T = sample.acc.shape[0]
     
-    acc_flat = sample.acc.reshape(T, -1)  # (T, 90)
-    gyro_flat = sample.gyro.reshape(T, -1)  # (T, 90)
+    acc_flat = sample.acc.reshape(T, -1)
+    gyro_flat = sample.gyro.reshape(T, -1)
     
     if use_upper_tri_dist:
         triu_indices = np.triu_indices(6, k=1)
-        dist_flat = sample.dist[:, triu_indices[0], triu_indices[1]]  # (T, 15)
+        dist_flat = sample.dist[:, triu_indices[0], triu_indices[1]]
     else:
-        dist_flat = sample.dist.reshape(T, -1)  # (T, 36)
+        dist_flat = sample.dist.reshape(T, -1)
     
     seq = np.concatenate([acc_flat, gyro_flat, dist_flat], axis=1)
     

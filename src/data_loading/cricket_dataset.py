@@ -18,9 +18,7 @@ try:
         get_label_distribution,
     )
 except ImportError:
-    # Fallback for when running as a script
     import sys
-    # Add parent directory to path so we can import load_visig
     script_dir = Path(__file__).parent
     if str(script_dir) not in sys.path:
         sys.path.insert(0, str(script_dir))
@@ -359,7 +357,6 @@ def create_cricket_datasets_stratified(
 if __name__ == "__main__":
     import os
     
-    # Load environment variables from .env file if dotenv is available
     try:
         from dotenv import load_dotenv
         project_root = Path(__file__).parent.parent.parent
@@ -369,7 +366,7 @@ if __name__ == "__main__":
         else:
             load_dotenv()
     except ImportError:
-        pass  # dotenv not available, skip
+        pass
     
     visig_root = os.getenv("VISIG_ROOT")
     if not visig_root:

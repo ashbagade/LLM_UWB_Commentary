@@ -10,7 +10,6 @@ from torch.utils.data import Dataset
 try:
     from .load_visig import ViSigSample, to_flat_sequence
 except ImportError:
-    # Fallback for when running as a script
     import sys
     script_dir = Path(__file__).parent
     if str(script_dir) not in sys.path:

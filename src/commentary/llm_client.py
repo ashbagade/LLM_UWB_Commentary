@@ -6,8 +6,6 @@ from typing import List, Dict, Optional
 from google import genai
 from google.genai import types
 
-# Default to a cheap, stable text model.
-# You can override this in code or via GEMINI_MODEL_NAME env var.
 DEFAULT_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
 
 
@@ -33,7 +31,6 @@ class LLMClient:
         self.model_name = model_name
         self.debug = debug
 
-        # Prefer explicit key; otherwise let the SDK read GEMINI_API_KEY/GOOGLE_API_KEY.
         if api_key is not None:
             self.client = genai.Client(api_key=api_key)
         else:
@@ -82,10 +79,8 @@ class LLMClient:
             config=config,
         )
 
-        # Primary path: use the convenience .text property.
         text = (getattr(response, "text", None) or "").strip()
 
-        # Fallback: manually reconstruct from candidates if .text is empty.
         if not text:
             text_parts: List[str] = []
             candidates = getattr(response, "candidates", None) or []
@@ -105,7 +100,4 @@ class LLMClient:
             print("[LLMClient] Extracted text:", repr(text))
             print()
 
-        # If it's still empty, just return empty string.
-        # The caller (CommentaryEngine) will still update match state;
-        # you’ll see debug output so you can diagnose Gemini issues.
         return text

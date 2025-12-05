@@ -134,3 +134,10 @@ dmypy.json
 *.swo
 *~
 
+# Project-specific
+outputs/
+models/*.pt
+models/*.pth
+*.log
+test_*.py
+
